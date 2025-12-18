@@ -13,30 +13,26 @@ using namespace std;
 constexpr int64_t SCALE = 1000000;
 constexpr int64_t CAPACITY = 100 * SCALE;
 constexpr int64_t COST = 1 * SCALE;
-constexpr int64_t REFILL_RATE_PER_SEC = 2;
+constexpr int64_t REFILL_RATE_PER_SEC = 2 * SCALE;
 
 class TokenBucket {
 private:
   int64_t capacity;
   int64_t tokens;
-  int64_t refill_rate_scaled; // this is also scaled to microseconds scaled
+  int64_t refill_rate_scaled; // this is also scaled to microseconds scaled ()
   int64_t cost_per_request_scaled;
+
   chrono::time_point<std::chrono::steady_clock> prev_time;
 
 public:
-  TokenBucket(int64_t cap, int64_t refill_rate, int64_t scale, int64_t cost)
-      : capacity(cap) {
+  TokenBucket(int64_t cap, int64_t refill_rate, int64_t cost)
+      : capacity(cap), refill_rate_scaled(refill_rate),
+        cost_per_request_scaled(cost) {
     tokens = 0;
-    refill_rate_scaled = (refill_rate * scale) / 1000000000;
-    cost_per_request_scaled = (cost * scale) / 1000000000;
+    prev_time = std::chrono::steady_clock::now();
   }
 
   bool token_consumption() {
-
-    chrono::time_point<std::chrono::steady_clock> prev_time =
-        std::chrono::steady_clock::now();
-    int64_t refill_rate_ns = (REFILL_RATE_PER_SEC * SCALE) / 1000000000;
-
     // removing the while loop as it will be applied in the main when the user
     // access is made to this method
 
@@ -45,7 +41,8 @@ public:
     auto elapsed_time =
         chrono::duration_cast<chrono::nanoseconds>(t - prev_time).count();
 
-    int64_t tokens_added = elapsed_time * refill_rate_ns;
+    prev_time = t;
+    int64_t tokens_added = (elapsed_time * refill_rate_scaled) / 1000000000LL;
 
     tokens = min(tokens + tokens_added, capacity);
 
@@ -58,8 +55,6 @@ public:
       return true;
     }
 
-    prev_time = t;
-
     return false;
   }
 
@@ -69,7 +64,7 @@ public:
 
 int main(int argc, char *argv[]) {
 
-  TokenBucket token_bucket(CAPACITY, REFILL_RATE_PER_SEC, SCALE, COST);
+  TokenBucket token_bucket(CAPACITY, REFILL_RATE_PER_SEC, COST);
 
   // because the loop will continue for ever its not limited to some limit
   // the system shall run forever through the course of the program
