@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <ctime>
 #include <iostream>
+#include <mutex>
 #include <thread>
 #include <unistd.h>
 
@@ -14,6 +15,7 @@ constexpr int64_t SCALE = 1000000;
 constexpr int64_t CAPACITY = 100 * SCALE;
 constexpr int64_t COST = 1 * SCALE;
 constexpr int64_t REFILL_RATE_PER_SEC = 2 * SCALE;
+constexpr int64_t MAX_ELAPSED_TIME = 1000000000LL;
 
 class TokenBucket {
 private:
@@ -23,6 +25,7 @@ private:
   int64_t cost_per_request_scaled;
 
   chrono::time_point<std::chrono::steady_clock> prev_time;
+  mutable mutex mtx;
 
 public:
   TokenBucket(int64_t cap, int64_t refill_rate, int64_t cost)
@@ -32,23 +35,25 @@ public:
     prev_time = std::chrono::steady_clock::now();
   }
 
-  bool token_consumption() {
+  bool allow() {
     // removing the while loop as it will be applied in the main when the user
     // access is made to this method
+    lock_guard<mutex> lock(mtx);
 
     chrono::time_point<std::chrono::steady_clock> t =
         std::chrono::steady_clock::now();
     auto elapsed_time =
         chrono::duration_cast<chrono::nanoseconds>(t - prev_time).count();
-
+    elapsed_time = min(elapsed_time, MAX_ELAPSED_TIME);
     prev_time = t;
     int64_t tokens_added = (elapsed_time * refill_rate_scaled) / 1000000000LL;
 
     tokens = min(tokens + tokens_added, capacity);
 
-    cout << "Delta(t) " << elapsed_time << "ns"
-         << ", tokens added: " << tokens_added << ", Total tokens: " << tokens
-         << " " << "consumption allowed ? ";
+    cout << "Delta(t) " << elapsed_time << "ns";
+    //         << ", tokens added: " << tokens_added << ", Total tokens: " <<
+    //         tokens
+    //         << " " << "consumption allowed ? ";
 
     if (tokens >= cost_per_request_scaled) {
       tokens -= cost_per_request_scaled;
@@ -59,7 +64,11 @@ public:
   }
 
   // getter function to access the private state variables
-  int64_t tokens_remaining() { return 0; };
+  int64_t tokens_remaining() {
+
+    lock_guard<mutex> lock(mtx);
+    return tokens;
+  };
 };
 
 int main(int argc, char *argv[]) {
@@ -70,7 +79,7 @@ int main(int argc, char *argv[]) {
   // the system shall run forever through the course of the program
 
   while (true) {
-    if (token_bucket.token_consumption()) {
+    if (token_bucket.allow()) {
       cout << "Success! Tokens remaining: " << token_bucket.tokens_remaining()
            << endl;
     } else {
